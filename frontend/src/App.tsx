@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { getTenantId, setTenantId } from "./tenant";
 import { contarPendientes, sincronizarPendientes } from "./offlineQueue";
+import { API_CONFIGURADA } from "./config";
 import Dashboard from "./pages/Dashboard";
 import Excepciones from "./pages/Excepciones";
 import CapturaOrigen from "./pages/CapturaOrigen";
@@ -85,6 +86,12 @@ export default function App() {
       </nav>
 
       <main>
+        {!API_CONFIGURADA && (
+          <div className="form-msg err" style={{ marginBottom: 20 }}>
+            Falta configurar VITE_API_URL: el frontend no sabe dónde está el backend. Configúrala como variable de
+            entorno en Vercel (URL del backend) y vuelve a desplegar.
+          </div>
+        )}
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/excepciones" element={<Excepciones />} />

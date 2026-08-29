@@ -1,8 +1,9 @@
+import { API_BASE_URL } from "./config";
 import { getTenantId } from "./tenant";
 import type { Excepcion, PadronCliente, PadronProducto, PadronUbicacion, PadronUnidad, Trip } from "./types";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: { "x-tenant-id": getTenantId(), ...(init?.headers ?? {}) },
   });
