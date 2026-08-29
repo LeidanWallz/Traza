@@ -1,0 +1,222 @@
+// Traza — schema de dominio (MVP, wedge agregados)
+// Todo modelo que cuelga de un Tenant se filtra SIEMPRE por tenantId a nivel de query.
+// Ver TRAZA_BRIEF_CLAUDE_CODE.md §4-5 para las reglas de negocio detrás de este schema.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Rol {
+  ADMIN
+  OPS
+  CHOFER
+  RECIBIDOR
+}
+
+enum EstadoViaje {
+  EN_TRANSITO
+  ENTREGADO
+  CONCILIADO
+  EXCEPCION
+}
+
+enum ValidacionEntrega {
+  AUTOMATICA
+  MANUAL
+}
+
+enum TipoEvidencia {
+  ORIGEN_DOCUMENTO
+  ORIGEN_CAPTURA_NATIVA
+  ENTREGA_FOTO
+}
+
+enum TipoExcepcion {
+  DUPLICADO
+  CANTIDAD_IMPOSIBLE
+  TIMEOUT_SIN_ENTREGA
+  GPS_FALTANTE
+  DESTINO_NO_COINCIDE
+}
+
+enum EstadoExcepcion {
+  ABIERTA
+  LIBERADA
+  RECHAZADA
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  nombre    String
+  createdAt DateTime @default(now())
+
+  usuarios   User[]
+  unidades   PadronUnidad[]
+  productos  PadronProducto[]
+  ubicaciones PadronUbicacion[]
+  clientes   PadronCliente[]
+  viajes     Trip[]
+}
+
+model User {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  email    String @unique
+  nombre   String
+  rol      Rol
+  createdAt DateTime @default(now())
+
+  excepcionesResueltas Excepcion[] @relation("ResueltaPor")
+
+  @@index([tenantId])
+}
+
+model PadronUnidad {
+  id            String  @id @default(cuid())
+  tenantId      String
+  tenant        Tenant  @relation(fields: [tenantId], references: [id])
+
+  identificador String  // placa / número económico
+  capacidadKg   Float?  // usado para regla de cantidad imposible
+
+  viajes        Trip[]
+
+  @@unique([tenantId, identificador])
+  @@index([tenantId])
+}
+
+model PadronProducto {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  nombre       String
+  unidadMedida String // ton, kg, m3, L, pza...
+
+  viajes Trip[]
+
+  @@unique([tenantId, nombre])
+  @@index([tenantId])
+}
+
+model PadronUbicacion {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  nombre           String
+  tipo             String  // "origen" | "destino" | "ambos" — libre por tenant
+  lat              Float
+  lng              Float
+  radioValidacionM Int     @default(300)
+
+  viajesOrigen  Trip[] @relation("Origen")
+  viajesDestino Trip[] @relation("Destino")
+
+  @@unique([tenantId, nombre])
+  @@index([tenantId])
+}
+
+model PadronCliente {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  nombre String
+
+  viajes Trip[]
+
+  @@unique([tenantId, nombre])
+  @@index([tenantId])
+}
+
+model Trip {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  folioOrigen String? // nullable: puede no haber documento de origen
+
+  unidadId  String
+  unidad    PadronUnidad @relation(fields: [unidadId], references: [id])
+
+  productoId String
+  producto   PadronProducto @relation(fields: [productoId], references: [id])
+
+  bruto Float?
+  tara  Float?
+  neto  Float?
+
+  origenId  String
+  origen    PadronUbicacion @relation("Origen", fields: [origenId], references: [id])
+
+  destinoId String // siempre obligatorio (§5.3)
+  destino   PadronUbicacion @relation("Destino", fields: [destinoId], references: [id])
+
+  clienteId String?
+  cliente   PadronCliente? @relation(fields: [clienteId], references: [id])
+
+  estado EstadoViaje @default(EN_TRANSITO)
+
+  horaOrigen  DateTime  @default(now())
+  horaEntrega DateTime?
+
+  validacionEntrega ValidacionEntrega?
+
+  evidencias  Evidencia[]
+  excepciones Excepcion[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, estado])
+  @@index([tenantId, folioOrigen])
+}
+
+model Evidencia {
+  id     String @id @default(cuid())
+  tripId String
+  trip   Trip   @relation(fields: [tripId], references: [id])
+
+  tipo TipoEvidencia
+
+  url  String // referencia inmutable al bucket (S3-compatible)
+  hash String // sha256 del archivo, usado para detectar duplicados
+
+  gps       Json?    // { lat, lng } — obligatorio para ENTREGA_FOTO (§5.4)
+  horaDispositivo DateTime?
+
+  ocrCrudo Json? // salida cruda del OCR: campos + confianza por campo
+
+  createdAt DateTime @default(now())
+
+  @@index([tripId])
+  @@index([hash])
+}
+
+model Excepcion {
+  id     String @id @default(cuid())
+  tripId String
+  trip   Trip   @relation(fields: [tripId], references: [id])
+
+  tipo    TipoExcepcion
+  detalle String
+
+  estado EstadoExcepcion @default(ABIERTA)
+
+  resueltaPorId String?
+  resueltaPor   User?   @relation("ResueltaPor", fields: [resueltaPorId], references: [id])
+  resueltaAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([tripId])
+  @@index([tripId, estado])
+}
